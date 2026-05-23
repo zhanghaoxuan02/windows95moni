@@ -1,0 +1,2299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Windows 95 模拟器</title>
+    <style>
+        :root {
+            --win-bg: #008080;
+            --win-gray: #c0c0c0;
+            --win-highlight: #ffffff;
+            --win-dark-shadow: #000000;
+            --win-title-active: #000080;
+            --win-title-inactive: #808080;
+            --win-button-face: #c0c0c0;
+            --taskbar-height: 32px;
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body {
+            font-family: 'MS Sans Serif', 'Microsoft Sans Serif', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-size: 11px;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            cursor: default;
+            background: #000;
+        }
+        #win95-container {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            transition: opacity 0.4s ease;
+        }
+        #win95-container.shutdown {
+            opacity: 0;
+            pointer-events: none;
+        }
+        #desktop {
+            position: relative;
+            flex: 1;
+            background: var(--win-bg);
+            overflow: hidden;
+            z-index: 1;
+            min-height: 0;
+        }
+        #desktop-icons {
+            position: absolute;
+            top: 10px;
+            left: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            z-index: 2;
+        }
+        .desktop-icon {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 72px;
+            padding: 6px 3px 4px 3px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            text-align: center;
+            border-radius: 0;
+        }
+        .desktop-icon:hover {
+            border: 2px dotted #c0c0c0;
+            background: rgba(255, 255, 255, 0.06);
+        }
+        .desktop-icon.selected {
+            background: #000080;
+            border: 2px dotted #c0c0c0;
+        }
+        .desktop-icon.selected .icon-label {
+            color: #fff;
+            background: #000080;
+            text-shadow: none;
+        }
+        .desktop-icon .icon-image {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 26px;
+            pointer-events: none;
+            margin-bottom: 2px;
+            image-rendering: pixelated;
+            filter: drop-shadow(1px 1px 0px rgba(0, 0, 0, 0.3));
+        }
+        .desktop-icon .icon-label {
+            color: #ffffff;
+            font-size: 9px;
+            text-align: center;
+            line-height: 1.15;
+            word-wrap: break-word;
+            max-width: 66px;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+            padding: 1px 2px;
+            letter-spacing: 0.2px;
+        }
+        .desktop-icon.selected .icon-label {
+            text-shadow: none;
+        }
+
+        /* 窗口 */
+        .window {
+            position: absolute;
+            min-width: 220px;
+            min-height: 120px;
+            background: var(--win-gray);
+            border: 2px solid;
+            border-color: var(--win-highlight) var(--win-dark-shadow) var(--win-dark-shadow) var(--win-highlight);
+            box-shadow: 2px 2px 0 0 rgba(0, 0, 0, 0.6);
+            display: flex;
+            flex-direction: column;
+            z-index: 10;
+            resize: both;
+            overflow: hidden;
+        }
+        .window.active {
+            z-index: 100;
+        }
+        .window.maximized {
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: calc(100vh - var(--taskbar-height)) !important;
+            resize: none;
+        }
+        .window.minimized {
+            display: none;
+        }
+        .window-titlebar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--win-title-inactive);
+            color: #c0c0c0;
+            padding: 2px 3px;
+            cursor: move;
+            min-height: 22px;
+            font-size: 11px;
+            font-weight: bold;
+            letter-spacing: 0.3px;
+            border-bottom: 1px solid #000;
+            flex-shrink: 0;
+            gap: 3px;
+        }
+        .window.active .window-titlebar {
+            background: var(--win-title-active);
+            color: #fff;
+        }
+        .window-titlebar .title-icon {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+        }
+        .window-titlebar .title-text {
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-size: 11px;
+            min-width: 0;
+            pointer-events: none;
+        }
+        .window-titlebar .title-buttons {
+            display: flex;
+            gap: 2px;
+            flex-shrink: 0;
+        }
+        .win-btn {
+            width: 16px;
+            height: 14px;
+            background: var(--win-button-face);
+            border: 2px solid;
+            border-color: var(--win-highlight) var(--win-dark-shadow) var(--win-dark-shadow) var(--win-highlight);
+            cursor: pointer;
+            font-size: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            font-weight: bold;
+            color: #000;
+            box-shadow: inset -1px -1px 0 0 #808080, inset 1px 1px 0 0 #fff;
+            position: relative;
+        }
+        .win-btn:active {
+            border-color: var(--win-dark-shadow) var(--win-highlight) var(--win-highlight) var(--win-dark-shadow);
+            box-shadow: inset 1px 1px 0 0 #808080, inset -1px -1px 0 0 #fff;
+            padding-top: 1px;
+            padding-left: 1px;
+        }
+        .win-btn-minimize::after {
+            content: '';
+            position: absolute;
+            bottom: 2px;
+            left: 3px;
+            right: 3px;
+            height: 2px;
+            background: #000;
+        }
+        .win-btn-maximize::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            right: 2px;
+            bottom: 2px;
+            border: 1.5px solid #000;
+            background: transparent;
+        }
+        .win-btn-restore::after {
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 5px;
+            width: 6px;
+            height: 5px;
+            border: 1.5px solid #000;
+            background: var(--win-button-face);
+            z-index: 1;
+        }
+        .win-btn-restore::before {
+            content: '';
+            position: absolute;
+            top: 1px;
+            left: 2px;
+            width: 6px;
+            height: 5px;
+            border: 1.5px solid #000;
+            background: var(--win-button-face);
+            z-index: 0;
+        }
+        .win-btn-close::after {
+            content: '✕';
+            font-size: 9px;
+            font-weight: bold;
+            color: #000;
+        }
+        .window-content {
+            flex: 1;
+            background: #ffffff;
+            border: 2px solid;
+            border-color: var(--win-dark-shadow) var(--win-highlight) var(--win-highlight) var(--win-dark-shadow);
+            overflow: auto;
+            position: relative;
+            min-height: 50px;
+        }
+        .window-content.padded {
+            padding: 8px;
+        }
+        .window-content.no-padding {
+            padding: 0;
+        }
+
+        /* 图标视图 */
+        .icon-view {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 10px;
+            align-items: flex-start;
+        }
+        .icon-view .drive-icon {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 66px;
+            padding: 5px 3px;
+            cursor: pointer;
+            text-align: center;
+            border: 2px solid transparent;
+            font-size: 10px;
+            color: #000;
+        }
+        .icon-view .drive-icon:hover {
+            border: 2px dotted #000080;
+            background: rgba(0, 0, 128, 0.05);
+        }
+        .icon-view .drive-icon .drv-img {
+            font-size: 28px;
+            margin-bottom: 2px;
+            pointer-events: none;
+        }
+        .icon-view .drive-icon .drv-label {
+            color: #000;
+            font-size: 9px;
+            word-wrap: break-word;
+            max-width: 60px;
+            line-height: 1.2;
+            pointer-events: none;
+        }
+
+        /* DOC编辑器 */
+        .doc-toolbar {
+            display: flex;
+            gap: 3px;
+            padding: 3px 5px;
+            background: #d4d0c8;
+            border-bottom: 1px solid #808080;
+            flex-wrap: wrap;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        .doc-toolbar button,
+        .doc-toolbar select {
+            font-size: 10px;
+            padding: 3px 8px;
+            cursor: pointer;
+            background: var(--win-button-face);
+            border: 2px solid;
+            border-color: var(--win-highlight) var(--win-dark-shadow) var(--win-dark-shadow) var(--win-highlight);
+            font-family: inherit;
+            box-shadow: inset -1px -1px 0 0 #808080, inset 1px 1px 0 0 #fff;
+            min-height: 22px;
+        }
+        .doc-toolbar button:active {
+            border-color: var(--win-dark-shadow) var(--win-highlight) var(--win-highlight) var(--win-dark-shadow);
+            box-shadow: inset 1px 1px 0 0 #808080, inset -1px -1px 0 0 #fff;
+        }
+        .doc-editor {
+            min-height: 200px;
+            padding: 16px 20px;
+            font-family: 'Times New Roman', serif;
+            font-size: 13px;
+            line-height: 1.7;
+            color: #000;
+            outline: none;
+            background: #fff;
+            height: 100%;
+            overflow-y: auto;
+        }
+        .doc-editor:focus {
+            outline: 1px dotted #000;
+        }
+
+        /* 表格编辑器 */
+        .sheet-toolbar {
+            display: flex;
+            gap: 4px;
+            padding: 3px 5px;
+            background: #d4d0c8;
+            border-bottom: 1px solid #808080;
+            align-items: center;
+            flex-shrink: 0;
+            font-size: 10px;
+        }
+        .sheet-toolbar button {
+            font-size: 10px;
+            padding: 3px 8px;
+            cursor: pointer;
+            background: var(--win-button-face);
+            border: 2px solid;
+            border-color: var(--win-highlight) var(--win-dark-shadow) var(--win-dark-shadow) var(--win-highlight);
+            font-family: inherit;
+            box-shadow: inset -1px -1px 0 0 #808080, inset 1px 1px 0 0 #fff;
+        }
+        .sheet-toolbar button:active {
+            border-color: var(--win-dark-shadow) var(--win-highlight) var(--win-highlight) var(--win-dark-shadow);
+            box-shadow: inset 1px 1px 0 0 #808080, inset -1px -1px 0 0 #fff;
+        }
+        .sheet-table-wrap {
+            overflow: auto;
+            flex: 1;
+            min-height: 150px;
+        }
+        .sheet-table-wrap table {
+            border-collapse: collapse;
+            font-size: 11px;
+            table-layout: auto;
+        }
+        .sheet-table-wrap table th,
+        .sheet-table-wrap table td {
+            border: 1px solid #808080;
+            padding: 0;
+            min-width: 70px;
+            height: 22px;
+            text-align: left;
+            vertical-align: middle;
+        }
+        .sheet-table-wrap table th {
+            background: #d4d0c8;
+            font-weight: bold;
+            text-align: center;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            padding: 2px 6px;
+        }
+        .sheet-table-wrap table td input {
+            width: 100%;
+            height: 100%;
+            border: none;
+            padding: 2px 4px;
+            font-size: 11px;
+            font-family: inherit;
+            background: transparent;
+            outline: none;
+            min-width: 60px;
+        }
+        .sheet-table-wrap table td input:focus {
+            background: #e8f0fe;
+            outline: 2px solid #000080;
+            position: relative;
+            z-index: 1;
+        }
+        .sheet-table-wrap table td.selected-cell {
+            outline: 2px solid #000080;
+            outline-offset: -1px;
+            z-index: 1;
+            position: relative;
+        }
+        .cell-addr {
+            font-size: 10px;
+            font-weight: bold;
+            color: #000;
+            min-width: 50px;
+            text-align: center;
+        }
+
+        /* 扫雷 */
+        .minesweeper-container {
+            display: flex;
+            flex-direction: column;
+            background: #d4d0c8;
+            padding: 6px;
+            height: 100%;
+            gap: 4px;
+            align-items: center;
+        }
+        .minesweeper-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            padding: 4px 8px;
+            background: #c0c0c0;
+            border: 2px inset #808080;
+            gap: 8px;
+        }
+        .mine-counter,
+        .mine-timer {
+            background: #000;
+            color: #f00;
+            font-family: 'Courier New', monospace;
+            font-size: 22px;
+            font-weight: bold;
+            padding: 2px 8px;
+            min-width: 50px;
+            text-align: center;
+            letter-spacing: 2px;
+            border: 2px inset #808080;
+        }
+        .mine-face {
+            width: 32px;
+            height: 32px;
+            font-size: 18px;
+            cursor: pointer;
+            background: var(--win-button-face);
+            border: 2px solid;
+            border-color: var(--win-highlight) var(--win-dark-shadow) var(--win-dark-shadow) var(--win-highlight);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: inset -1px -1px 0 0 #808080, inset 1px 1px 0 0 #fff;
+        }
+        .mine-face:active {
+            border-color: var(--win-dark-shadow) var(--win-highlight) var(--win-highlight) var(--win-dark-shadow);
+            box-shadow: inset 1px 1px 0 0 #808080, inset -1px -1px 0 0 #fff;
+        }
+        .mine-grid {
+            display: grid;
+            gap: 0;
+            border: 2px inset #808080;
+            background: #bdbdbd;
+            padding: 2px;
+        }
+        .mine-cell {
+            width: 20px;
+            height: 20px;
+            background: var(--win-button-face);
+            border: 2px solid;
+            border-color: var(--win-highlight) var(--win-dark-shadow) var(--win-dark-shadow) var(--win-highlight);
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: inset -1px -1px 0 0 #808080, inset 1px 1px 0 0 #fff;
+            transition: none;
+            color: #000;
+        }
+        .mine-cell.revealed {
+            background: #d4d0c8;
+            border: 1px solid #808080;
+            box-shadow: none;
+            cursor: default;
+        }
+        .mine-cell.flagged {
+            color: #f00;
+        }
+        .mine-cell.mine-exploded {
+            background: #f00 !important;
+            border-color: #800 !important;
+        }
+
+        /* 控制面板 */
+        .control-panel-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 12px;
+        }
+        .cpl-icon {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 70px;
+            padding: 6px 3px;
+            cursor: pointer;
+            text-align: center;
+            border: 2px solid transparent;
+            font-size: 10px;
+            color: #000;
+        }
+        .cpl-icon:hover {
+            border: 2px dotted #000080;
+            background: rgba(0, 0, 128, 0.05);
+        }
+        .cpl-icon .cpl-img {
+            font-size: 28px;
+            margin-bottom: 2px;
+        }
+        .cpl-icon .cpl-label {
+            font-size: 9px;
+            text-align: center;
+            line-height: 1.15;
+        }
+
+        /* 打印机 */
+        .printer-queue {
+            padding: 10px;
+            font-size: 11px;
+        }
+        .printer-queue table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+        }
+        .printer-queue table th,
+        .printer-queue table td {
+            border: 1px solid #808080;
+            padding: 3px 6px;
+            text-align: left;
+        }
+        .printer-queue table th {
+            background: #d4d0c8;
+        }
+
+        /* 任务栏 */
+        #taskbar {
+            height: var(--taskbar-height);
+            background: var(--win-gray);
+            border-top: 2px solid var(--win-highlight);
+            display: flex;
+            align-items: center;
+            padding: 2px 3px;
+            gap: 3px;
+            z-index: 1000;
+            box-shadow: 0 -1px 0 0 #000;
+            flex-shrink: 0;
+        }
+        #start-button {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px 2px 5px;
+            background: var(--win-button-face);
+            border: 2px solid;
+            border-color: var(--win-highlight) var(--win-dark-shadow) var(--win-dark-shadow) var(--win-highlight);
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 11px;
+            font-family: inherit;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+            box-shadow: inset -1px -1px 0 0 #808080, inset 1px 1px 0 0 #fff;
+            min-width: 55px;
+            height: 24px;
+            transition: none;
+        }
+        #start-button:active,
+        #start-button.active {
+            border-color: var(--win-dark-shadow) var(--win-highlight) var(--win-highlight) var(--win-dark-shadow);
+            box-shadow: inset 1px 1px 0 0 #808080, inset -1px -1px 0 0 #fff;
+            padding-top: 3px;
+            padding-left: 6px;
+        }
+        #start-button .start-icon {
+            font-size: 16px;
+            line-height: 1;
+        }
+        #taskbar-windows {
+            display: flex;
+            gap: 2px;
+            flex: 1;
+            overflow-x: auto;
+            min-width: 0;
+            height: 24px;
+            align-items: center;
+        }
+        .taskbar-window-btn {
+            padding: 2px 10px;
+            background: var(--win-button-face);
+            border: 2px solid;
+            border-color: var(--win-highlight) var(--win-dark-shadow) var(--win-dark-shadow) var(--win-highlight);
+            cursor: pointer;
+            font-size: 10px;
+            white-space: nowrap;
+            max-width: 140px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-family: inherit;
+            letter-spacing: 0.2px;
+            box-shadow: inset -1px -1px 0 0 #808080, inset 1px 1px 0 0 #fff;
+            height: 22px;
+            flex-shrink: 0;
+            transition: none;
+        }
+        .taskbar-window-btn.active {
+            border-color: var(--win-dark-shadow) var(--win-highlight) var(--win-highlight) var(--win-dark-shadow);
+            box-shadow: inset 1px 1px 0 0 #808080, inset -1px -1px 0 0 #fff;
+            font-weight: bold;
+            padding-top: 3px;
+        }
+        #system-tray {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 0 8px;
+            border: 2px solid;
+            border-color: var(--win-dark-shadow) var(--win-highlight) var(--win-highlight) var(--win-dark-shadow);
+            height: 24px;
+            font-size: 10px;
+            white-space: nowrap;
+            background: var(--win-button-face);
+            box-shadow: inset 1px 1px 0 0 #808080;
+            letter-spacing: 0.3px;
+        }
+        #clock {
+            font-size: 10px;
+            letter-spacing: 0.3px;
+        }
+
+        /* 开始菜单 */
+        #start-menu {
+            position: fixed;
+            bottom: var(--taskbar-height);
+            left: 2px;
+            background: var(--win-gray);
+            border: 2px solid;
+            border-color: var(--win-highlight) var(--win-dark-shadow) var(--win-dark-shadow) var(--win-highlight);
+            box-shadow: 1px 1px 0 0 #000;
+            z-index: 999;
+            display: none;
+            min-width: 200px;
+            flex-direction: row;
+        }
+        #start-menu.show {
+            display: flex;
+        }
+        #start-menu .start-sidebar {
+            background: linear-gradient(to bottom, #808080, #606060);
+            color: #d0d0d0;
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            padding: 8px 4px;
+            font-weight: bold;
+            font-size: 18px;
+            letter-spacing: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 22px;
+            flex-shrink: 0;
+            text-shadow: 1px 1px 2px #000;
+        }
+        #start-menu .start-items {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 2px 0;
+        }
+        #start-menu .start-item {
+            padding: 6px 14px;
+            cursor: pointer;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+            border: 2px solid transparent;
+            letter-spacing: 0.3px;
+            color: #000;
+            position: relative;
+        }
+        #start-menu .start-item:hover {
+            background: #000080;
+            color: #ffffff;
+        }
+        #start-menu .start-item .menu-icon {
+            font-size: 16px;
+            width: 20px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        #start-menu .start-separator {
+            height: 2px;
+            background: #808080;
+            margin: 3px 8px;
+            border-top: 1px solid #fff;
+        }
+        #start-menu .start-item.has-submenu::after {
+            content: '►';
+            margin-left: auto;
+            font-size: 8px;
+            color: inherit;
+        }
+        .submenu {
+            position: absolute;
+            left: 100%;
+            top: 0;
+            background: var(--win-gray);
+            border: 2px solid;
+            border-color: var(--win-highlight) var(--win-dark-shadow) var(--win-dark-shadow) var(--win-highlight);
+            box-shadow: 1px 1px 0 0 #000;
+            z-index: 1001;
+            display: none;
+            min-width: 150px;
+            flex-direction: column;
+            padding: 2px 0;
+        }
+        .submenu.show {
+            display: flex;
+        }
+        .submenu .start-item {
+            padding: 5px 12px;
+            font-size: 11px;
+        }
+
+        /* 关机 */
+        #shutdown-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.55);
+            z-index: 2000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        #shutdown-overlay.show {
+            display: flex;
+        }
+        #shutdown-dialog {
+            background: var(--win-gray);
+            border: 2px solid;
+            border-color: var(--win-highlight) var(--win-dark-shadow) var(--win-dark-shadow) var(--win-highlight);
+            box-shadow: 2px 2px 0 0 #000;
+            padding: 0;
+            min-width: 300px;
+            z-index: 2001;
+        }
+        #shutdown-dialog .dialog-titlebar {
+            background: #000080;
+            color: #fff;
+            padding: 3px 6px;
+            font-weight: bold;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        #shutdown-dialog .dialog-content {
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            font-size: 12px;
+        }
+        #shutdown-dialog .dialog-icon {
+            font-size: 32px;
+        }
+        #shutdown-dialog .dialog-buttons {
+            display: flex;
+            gap: 6px;
+            justify-content: center;
+            padding: 8px 16px 12px;
+        }
+        #shutdown-dialog .dialog-buttons button {
+            padding: 4px 20px;
+            font-size: 11px;
+            cursor: pointer;
+            background: var(--win-button-face);
+            border: 2px solid;
+            border-color: var(--win-highlight) var(--win-dark-shadow) var(--win-dark-shadow) var(--win-highlight);
+            font-family: inherit;
+            box-shadow: inset -1px -1px 0 0 #808080, inset 1px 1px 0 0 #fff;
+        }
+
+        /* 开机 */
+        #boot-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #0a5eb5;
+            z-index: 3000;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 30px;
+        }
+        #boot-screen.show {
+            display: flex;
+        }
+        #boot-screen .boot-text {
+            color: #fff;
+            font-size: 28px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.4);
+        }
+        #boot-screen .boot-btn {
+            padding: 16px 50px;
+            font-size: 20px;
+            font-weight: bold;
+            cursor: pointer;
+            background: #e8e8e8;
+            border: 4px solid;
+            border-color: #fff #333 #333 #fff;
+            font-family: inherit;
+            letter-spacing: 2px;
+            box-shadow: inset -2px -2px 0 0 #888, inset 2px 2px 0 0 #fff, 4px 4px 12px rgba(0, 0, 0, 0.5);
+            color: #000;
+        }
+        #boot-screen .boot-btn:active {
+            border-color: #333 #fff #fff #333;
+            box-shadow: inset 2px 2px 0 0 #888, inset -2px -2px 0 0 #fff;
+            transform: scale(0.97);
+        }
+        #boot-screen .boot-icon {
+            font-size: 64px;
+            filter: drop-shadow(2px 4px 6px rgba(0, 0, 0, 0.5));
+        }
+
+        /* 右键菜单 */
+        #context-menu {
+            position: fixed;
+            background: var(--win-gray);
+            border: 2px solid;
+            border-color: var(--win-highlight) var(--win-dark-shadow) var(--win-dark-shadow) var(--win-highlight);
+            box-shadow: 1px 1px 0 0 #000;
+            z-index: 1500;
+            display: none;
+            flex-direction: column;
+            padding: 2px 0;
+            min-width: 170px;
+        }
+        #context-menu .ctx-item {
+            padding: 5px 16px;
+            cursor: pointer;
+            font-size: 11px;
+            white-space: nowrap;
+            border: 2px solid transparent;
+            letter-spacing: 0.3px;
+            color: #000;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        #context-menu .ctx-item:hover {
+            background: #000080;
+            color: #fff;
+        }
+        #context-menu .ctx-item.disabled {
+            color: #808080;
+            cursor: default;
+            pointer-events: none;
+        }
+        #context-menu .ctx-separator {
+            height: 2px;
+            background: #808080;
+            margin: 2px 8px;
+            border-top: 1px solid #fff;
+        }
+        #context-menu .ctx-item .ctx-shortcut {
+            margin-left: auto;
+            font-size: 10px;
+            color: inherit;
+            opacity: 0.7;
+        }
+
+        /* 文件浏览器 */
+        .file-browser {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            background: #fff;
+        }
+        .file-browser .fb-toolbar {
+            display: flex;
+            gap: 3px;
+            padding: 3px 5px;
+            background: #d4d0c8;
+            border-bottom: 1px solid #808080;
+            flex-shrink: 0;
+            align-items: center;
+        }
+        .file-browser .fb-toolbar button {
+            font-size: 10px;
+            padding: 2px 7px;
+            cursor: pointer;
+            background: var(--win-button-face);
+            border: 2px solid;
+            border-color: var(--win-highlight) var(--win-dark-shadow) var(--win-dark-shadow) var(--win-highlight);
+            font-family: inherit;
+            box-shadow: inset -1px -1px 0 0 #808080, inset 1px 1px 0 0 #fff;
+        }
+        .file-browser .fb-address {
+            flex: 1;
+            padding: 2px 6px;
+            font-size: 10px;
+            border: 2px inset #808080;
+            background: #fff;
+            font-family: inherit;
+            min-width: 0;
+        }
+        .file-browser .fb-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 8px;
+            align-content: flex-start;
+            background: #fff;
+        }
+        .file-browser .fb-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 64px;
+            padding: 4px 2px;
+            cursor: pointer;
+            text-align: center;
+            border: 2px solid transparent;
+            font-size: 9px;
+            color: #000;
+        }
+        .file-browser .fb-item:hover {
+            border: 2px dotted #000080;
+            background: rgba(0, 0, 128, 0.04);
+        }
+        .file-browser .fb-item .fb-img {
+            font-size: 26px;
+            margin-bottom: 2px;
+            pointer-events: none;
+        }
+        .file-browser .fb-item .fb-label {
+            font-size: 9px;
+            word-wrap: break-word;
+            max-width: 58px;
+            line-height: 1.15;
+            pointer-events: none;
+        }
+
+        /* 显示属性对话框 */
+        .display-props {
+            padding: 16px;
+            font-size: 11px;
+        }
+        .display-props .color-swatch {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 2px inset #808080;
+            margin: 4px;
+            cursor: pointer;
+            vertical-align: middle;
+        }
+        .display-props .color-swatch:hover {
+            outline: 2px solid #000;
+        }
+
+        @media (max-width: 600px) {
+            .window {
+                min-width: 150px;
+                min-height: 80px;
+                max-width: 94vw !important;
+            }
+            #desktop-icons {
+                left: 3px;
+                top: 3px;
+                gap: 0px;
+            }
+            .desktop-icon {
+                width: 50px;
+                padding: 2px 1px;
+            }
+            .desktop-icon .icon-image {
+                font-size: 18px;
+                width: 22px;
+                height: 22px;
+            }
+            .desktop-icon .icon-label {
+                font-size: 7px;
+                max-width: 44px;
+            }
+            .mine-cell {
+                width: 16px;
+                height: 16px;
+                font-size: 9px;
+            }
+            #start-menu {
+                min-width: 140px;
+                left: 0;
+            }
+            .submenu {
+                left: auto;
+                right: 100%;
+                min-width: 120px;
+            }
+            #boot-screen .boot-btn {
+                padding: 10px 24px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="win95-container">
+        <div id="desktop">
+            <div id="desktop-icons">
+                <div class="desktop-icon" data-window="mycomputer" data-title="我的电脑" ondblclick="openWindow('mycomputer')" onclick="selectDesktopIcon(this,event)">
+                    <div class="icon-image">🖥️</div><div class="icon-label">我的电脑</div>
+                </div>
+                <div class="desktop-icon" data-window="recycle" data-title="回收站" ondblclick="openWindow('recycle')" onclick="selectDesktopIcon(this,event)">
+                    <div class="icon-image">🗑️</div><div class="icon-label">回收站</div>
+                </div>
+                <div class="desktop-icon" data-window="mydocuments" data-title="我的文档" ondblclick="openWindow('mydocuments')" onclick="selectDesktopIcon(this,event)">
+                    <div class="icon-image">📁</div><div class="icon-label">我的文档</div>
+                </div>
+                <div class="desktop-icon" data-window="c_drive" data-title="硬盘 (C:)" ondblclick="openWindow('c_drive')" onclick="selectDesktopIcon(this,event)">
+                    <div class="icon-image">💿</div><div class="icon-label">硬盘 (C:)</div>
+                </div>
+                <div class="desktop-icon" data-window="d_drive" data-title="光盘 (D:)" ondblclick="openWindow('d_drive')" onclick="selectDesktopIcon(this,event)">
+                    <div class="icon-image">📀</div><div class="icon-label">光盘 (D:)</div>
+                </div>
+                <div class="desktop-icon" data-window="controlpanel" data-title="控制面板" ondblclick="openWindow('controlpanel')" onclick="selectDesktopIcon(this,event)">
+                    <div class="icon-image">⚙️</div><div class="icon-label">控制面板</div>
+                </div>
+                <div class="desktop-icon" data-window="printer" data-title="打印机" ondblclick="openWindow('printer')" onclick="selectDesktopIcon(this,event)">
+                    <div class="icon-image">🖨️</div><div class="icon-label">打印机</div>
+                </div>
+                <div class="desktop-icon" data-window="minesweeper" data-title="扫雷" ondblclick="openWindow('minesweeper')" onclick="selectDesktopIcon(this,event)">
+                    <div class="icon-image">💣</div><div class="icon-label">扫雷</div>
+                </div>
+                <div class="desktop-icon" data-window="notepad" data-title="记事本" ondblclick="openWindow('notepad')" onclick="selectDesktopIcon(this,event)">
+                    <div class="icon-image">📝</div><div class="icon-label">记事本</div>
+                </div>
+                <div class="desktop-icon" data-window="about" data-title="关于 Windows 95" ondblclick="openWindow('about')" onclick="selectDesktopIcon(this,event)">
+                    <div class="icon-image">ℹ️</div><div class="icon-label">关于 Windows</div>
+                </div>
+            </div>
+            <div id="windows-container"></div>
+        </div>
+        <div id="taskbar">
+            <button id="start-button" onclick="toggleStartMenu(event)" title="开始"><span class="start-icon">🪟</span> 开始</button>
+            <div id="taskbar-windows"></div>
+            <div id="system-tray"><span id="clock"></span></div>
+        </div>
+    </div>
+
+    <!-- 开始菜单 -->
+    <div id="start-menu">
+        <div class="start-sidebar">Windows 95</div>
+        <div class="start-items">
+            <div class="start-item has-submenu" data-submenu="programs-submenu" onclick="toggleSubmenu(event,'programs-submenu')"><span class="menu-icon">📋</span> 程序</div>
+            <div class="start-item" onclick="openWindow('mydocuments');closeStartMenu();"><span class="menu-icon">📄</span> 文档</div>
+            <div class="start-item has-submenu" data-submenu="settings-submenu" onclick="toggleSubmenu(event,'settings-submenu')"><span class="menu-icon">⚙️</span> 设置</div>
+            <div class="start-item" onclick="openWindow('c_drive');closeStartMenu();"><span class="menu-icon">🔍</span> 查找</div>
+            <div class="start-item" onclick="openWindow('about');closeStartMenu();"><span class="menu-icon">❓</span> 帮助</div>
+            <div class="start-item" onclick="openWindow('run');closeStartMenu();"><span class="menu-icon">▶️</span> 运行...</div>
+            <div class="start-separator"></div>
+            <div class="start-item" onclick="showShutdownDialog();closeStartMenu();"><span class="menu-icon">⏻</span> 关机...</div>
+        </div>
+        <div class="submenu" id="programs-submenu">
+            <div class="start-item has-submenu" data-submenu="accessories-submenu" onclick="toggleSubmenuNested(event,'accessories-submenu')"><span class="menu-icon">📎</span> 附件</div>
+            <div class="start-item" onclick="openWindow('c_drive');closeStartMenu();closeAllSubmenus();"><span class="menu-icon">🖥️</span> 资源管理器</div>
+            <div class="start-item" onclick="openWindow('minesweeper');closeStartMenu();closeAllSubmenus();"><span class="menu-icon">💣</span> 游戏</div>
+        </div>
+        <div class="submenu" id="accessories-submenu" style="left:100%;top:0;">
+            <div class="start-item" onclick="openWindow('notepad');closeStartMenu();closeAllSubmenus();"><span class="menu-icon">📝</span> 记事本</div>
+            <div class="start-item" onclick="openWindow('calculator');closeStartMenu();closeAllSubmenus();"><span class="menu-icon">🔢</span> 计算器</div>
+            <div class="start-item" onclick="openWindow('paint');closeStartMenu();closeAllSubmenus();"><span class="menu-icon">🎨</span> 画图</div>
+        </div>
+        <div class="submenu" id="settings-submenu">
+            <div class="start-item" onclick="openWindow('controlpanel');closeStartMenu();closeAllSubmenus();"><span class="menu-icon">⚙️</span> 控制面板</div>
+            <div class="start-item" onclick="openWindow('printer');closeStartMenu();closeAllSubmenus();"><span class="menu-icon">🖨️</span> 打印机</div>
+        </div>
+    </div>
+
+    <div id="shutdown-overlay" onclick="hideShutdownDialog()">
+        <div id="shutdown-dialog" onclick="event.stopPropagation()">
+            <div class="dialog-titlebar">关闭 Windows</div>
+            <div class="dialog-content"><div class="dialog-icon">⏻</div><div>您确定要关闭计算机吗？</div></div>
+            <div class="dialog-buttons"><button id="shutdown-yes-btn">是</button><button onclick="hideShutdownDialog()">否</button><button onclick="alert('请保存所有工作后关闭计算机。')">帮助</button></div>
+        </div>
+    </div>
+
+    <div id="boot-screen">
+        <div class="boot-icon">🪟</div><div class="boot-text">Windows 95</div>
+        <button class="boot-btn" onclick="powerOn()">开 机</button>
+    </div>
+
+    <div id="context-menu">
+        <div class="ctx-item" onclick="ctxArrangeIcons()"><span>📐</span> 排列图标<span class="ctx-shortcut"></span></div>
+        <div class="ctx-item" onclick="ctxRefresh()"><span>🔄</span> 刷新</div>
+        <div class="ctx-separator"></div>
+        <div class="ctx-item" onclick="ctxPaste()"><span>📋</span> 粘贴<span class="ctx-shortcut">Ctrl+V</span></div>
+        <div class="ctx-item disabled"><span>📄</span> 新建<span class="ctx-shortcut">►</span></div>
+        <div class="ctx-separator"></div>
+        <div class="ctx-item" onclick="ctxProperties()"><span>ℹ️</span> 属性</div>
+    </div>
+
+    <script>
+        // ============ 全局状态 ============
+        let windowZIndex = 10;
+        const openWindows = {};
+        let activeWindowId = null;
+        let startMenuOpen = false;
+        let dragging = null;
+        let selectedDesktopIconEl = null;
+        let isShutdown = false;
+
+        // 模拟文件系统
+        const fileSystem = {
+            'C:\\': {
+                type: 'folder',
+                children: {
+                    'Windows': { type: 'folder', children: { 'System': { type: 'folder', children: {} },
+                            'Win.ini': { type: 'file', content: '; Windows 95 配置文件' },
+                            'explorer.exe': { type: 'file', content: 'EXE文件' } } },
+                    'Program Files': { type: 'folder', children: { 'Accessories': { type: 'folder',
+                            children: {} }, 'Internet Explorer': { type: 'folder', children: {} } } },
+                    'My Documents': { type: 'folder', children: {} },
+                    'autoexec.bat': { type: 'file', content: '@echo off\r\nSET PATH=C:\\WINDOWS' },
+                    'config.sys': { type: 'file', content: 'DEVICE=C:\\WINDOWS\\HIMEM.SYS' }
+                }
+            },
+            'D:\\': {
+                type: 'folder',
+                children: {
+                    'Setup': { type: 'folder', children: { 'setup.exe': { type: 'file',
+                            content: '安装程序' } } },
+                    'README.txt': { type: 'file', content: '光盘内容说明文件。' },
+                    'Autorun.inf': { type: 'file', content: '[autorun]\nopen=setup.exe' },
+                    'Data': { type: 'folder', children: { 'database.mdb': { type: 'file',
+                            content: '数据库文件' } } }
+                }
+            }
+        };
+
+        function getFS(path) {
+            const parts = path.split('\\').filter(p => p);
+            let current = fileSystem['C:\\'];
+            if (parts[0] === 'D:') { current = fileSystem['D:\\'];
+                parts.shift(); }
+            for (const p of parts) {
+                if (!current || !current.children || !current.children[p]) return null;
+                current = current.children[p];
+            }
+            return current;
+        }
+
+        // ============ 关机/开机 ============
+        function showShutdownDialog() { document.getElementById('shutdown-overlay').classList.add('show'); }
+
+        function hideShutdownDialog() { document.getElementById('shutdown-overlay').classList.remove('show'); }
+
+        function performShutdown() {
+            hideShutdownDialog();
+            closeStartMenu();
+            closeAllSubmenus();
+            hideContextMenu();
+            Object.keys(openWindows).forEach(id => {
+                const el = openWindows[id].element;
+                if (el && el.parentNode) el.parentNode.removeChild(el);
+                delete openWindows[id];
+            });
+            activeWindowId = null;
+            updateTaskbarButtons();
+            deselectAllIcons();
+            document.getElementById('win95-container').classList.add('shutdown');
+            setTimeout(() => { document.getElementById('boot-screen').classList.add('show'); }, 400);
+            isShutdown = true;
+        }
+
+        function powerOn() {
+            document.getElementById('boot-screen').classList.remove('show');
+            setTimeout(() => {
+                document.getElementById('win95-container').classList.remove('shutdown');
+                document.getElementById('windows-container').innerHTML = '';
+                Object.keys(openWindows).forEach(k => delete openWindows[k]);
+                activeWindowId = null;
+                windowZIndex = 10;
+                updateTaskbarButtons();
+                deselectAllIcons();
+                isShutdown = false;
+            }, 150);
+        }
+        document.getElementById('shutdown-yes-btn').addEventListener('click', performShutdown);
+
+        // ============ 窗口管理 ============
+        function createWindowElement(id, title, contentHTML, icon = '📄', width = 500, height = 350, left = null,
+            top = null) {
+            const container = document.getElementById('windows-container');
+            if (left === null) { const c = Object.keys(openWindows).length;
+                left = 45 + c * 25; if (left > window.innerWidth - 260) left = 25 + c * 16; }
+            if (top === null) { const c = Object.keys(openWindows).length;
+                top = 30 + c * 28; if (top > window.innerHeight - 200) top = 20 + c * 12; }
+            left = Math.max(0, Math.min(left, window.innerWidth - 220));
+            top = Math.max(0, Math.min(top, window.innerHeight - 160));
+            const winDiv = document.createElement('div');
+            winDiv.className = 'window active';
+            winDiv.id = 'window-' + id;
+            winDiv.style.cssText = `left:${left}px;top:${top}px;width:${width}px;height:${height}px;z-index:${windowZIndex};`;
+            winDiv.setAttribute('data-window-id', id);
+            winDiv.innerHTML = `
+            <div class="window-titlebar" onmousedown="startDrag(event,'${id}')" ondblclick="toggleMaximize('${id}')">
+              <span class="title-icon">${icon}</span><span class="title-text">${title}</span>
+              <div class="title-buttons">
+                <button class="win-btn win-btn-minimize" onclick="event.stopPropagation();minimizeWindow('${id}')" title="最小化"></button>
+                <button class="win-btn win-btn-maximize" id="maxbtn-${id}" onclick="event.stopPropagation();toggleMaximize('${id}')" title="最大化"></button>
+                <button class="win-btn win-btn-close" onclick="event.stopPropagation();closeWindow('${id}')" title="关闭"></button>
+              </div>
+            </div>
+            <div class="window-content padded" id="content-${id}">${contentHTML}</div>`;
+            container.appendChild(winDiv);
+            windowZIndex++;
+            winDiv.style.zIndex = windowZIndex;
+            openWindows[id] = { title, minimized: false, maximized: false, element: winDiv,
+                prevState: { left, top, width, height }, icon };
+            activateWindow(id);
+            updateTaskbarButtons();
+            winDiv.addEventListener('mousedown', function() { activateWindow(id); });
+            return winDiv;
+        }
+
+        function activateWindow(id) {
+            if (!openWindows[id]) return;
+            if (activeWindowId === id && !openWindows[id].minimized) return;
+            Object.values(openWindows).forEach(w => w.element.classList.remove('active'));
+            openWindows[id].element.classList.add('active');
+            windowZIndex++;
+            openWindows[id].element.style.zIndex = windowZIndex;
+            activeWindowId = id;
+            if (openWindows[id].minimized) restoreWindow(id);
+            updateTaskbarButtons();
+            updateMaximizeButton(id);
+        }
+
+        function openWindow(id) {
+            if (isShutdown) return;
+            if (openWindows[id]) { if (openWindows[id].minimized) restoreWindow(id);
+                activateWindow(id);
+                bringToFront(id); return; }
+            let title, content, icon, width, height;
+            switch (id) {
+                case 'mycomputer':
+                    title = '我的电脑';
+                    icon = '🖥️';
+                    width = 520;
+                    height = 380;
+                    content = `<div class="icon-view">
+                <div class="drive-icon" ondblclick="openWindow('c_drive')"><div class="drv-img">💿</div><div class="drv-label">硬盘 (C:)</div></div>
+                <div class="drive-icon" ondblclick="openWindow('d_drive')"><div class="drv-img">📀</div><div class="drv-label">光盘 (D:)</div></div>
+                <div class="drive-icon" ondblclick="openWindow('controlpanel')"><div class="drv-img">⚙️</div><div class="drv-label">控制面板</div></div>
+                <div class="drive-icon" ondblclick="openWindow('printer')"><div class="drv-img">🖨️</div><div class="drv-label">打印机</div></div>
+                <div class="drive-icon" ondblclick="openWindow('mydocuments')"><div class="drv-img">📁</div><div class="drv-label">我的文档</div></div>
+              </div>`;
+                    break;
+                case 'c_drive':
+                    title = '硬盘 (C:)';
+                    icon = '💿';
+                    width = 550;
+                    height = 400;
+                    content = buildFileBrowser('C:\\');
+                    break;
+                case 'd_drive':
+                    title = '光盘 (D:)';
+                    icon = '📀';
+                    width = 500;
+                    height = 360;
+                    content = buildFileBrowser('D:\\');
+                    break;
+                case 'controlpanel':
+                    title = '控制面板';
+                    icon = '⚙️';
+                    width = 480;
+                    height = 340;
+                    content = `<div class="control-panel-grid">
+                <div class="cpl-icon" ondblclick="openWindow('displayprops')"><div class="cpl-img">🖥️</div><div class="cpl-label">显示</div></div>
+                <div class="cpl-icon" ondblclick="openWindow('datetime')"><div class="cpl-img">🕐</div><div class="cpl-label">日期/时间</div></div>
+                <div class="cpl-icon" ondblclick="openWindow('printer')"><div class="cpl-img">🖨️</div><div class="cpl-label">打印机</div></div>
+                <div class="cpl-icon"><div class="cpl-img">🖱️</div><div class="cpl-label">鼠标</div></div>
+                <div class="cpl-icon"><div class="cpl-img">⌨️</div><div class="cpl-label">键盘</div></div>
+                <div class="cpl-icon"><div class="cpl-img">🔊</div><div class="cpl-label">声音</div></div>
+                <div class="cpl-icon"><div class="cpl-img">🌐</div><div class="cpl-label">网络</div></div>
+                <div class="cpl-icon"><div class="cpl-img">🔌</div><div class="cpl-label">系统</div></div>
+              </div>`;
+                    break;
+                case 'displayprops':
+                    title = '显示 属性';
+                    icon = '🖥️';
+                    width = 420;
+                    height = 320;
+                    content = `<div class="display-props">
+                <p><strong>桌面背景颜色：</strong></p>
+                <div style="margin:8px 0;">
+                  <span class="color-swatch" style="background:#008080;" onclick="changeDesktopColor('#008080')"></span>
+                  <span class="color-swatch" style="background:#000080;" onclick="changeDesktopColor('#000080')"></span>
+                  <span class="color-swatch" style="background:#4a6d3c;" onclick="changeDesktopColor('#4a6d3c')"></span>
+                  <span class="color-swatch" style="background:#6b3a6b;" onclick="changeDesktopColor('#6b3a6b')"></span>
+                  <span class="color-swatch" style="background:#3a3a3a;" onclick="changeDesktopColor('#3a3a3a')"></span>
+                  <span class="color-swatch" style="background:#c0c0c0;" onclick="changeDesktopColor('#c0c0c0')"></span>
+                </div>
+                <p style="margin-top:12px;">单击色块即可更改桌面背景颜色。</p>
+                <p style="color:#808080;font-size:10px;">当前: <span id="current-color-text">#008080</span></p>
+              </div>`;
+                    break;
+                case 'datetime':
+                    title = '日期/时间 属性';
+                    icon = '🕐';
+                    width = 360;
+                    height = 260;
+                    const now = new Date();
+                    content = `<div style="padding:16px;text-align:center;font-size:12px;">
+                <p style="font-size:24px;font-weight:bold;margin-bottom:8px;" id="dt-display">${now.toLocaleString('zh-CN')}</p>
+                <p>当前日期和时间（模拟）</p>
+                <p style="color:#808080;font-size:10px;">实际时间请查看任务栏时钟</p>
+              </div>`;
+                    break;
+                case 'printer':
+                    title = '打印机';
+                    icon = '🖨️';
+                    width = 460;
+                    height = 320;
+                    content = `<div class="printer-queue">
+                <p style="font-weight:bold;margin-bottom:8px;">📠 默认打印机: HP LaserJet 5L</p>
+                <p style="margin-bottom:6px;">打印队列：</p>
+                <table><thead><tr><th>文档名</th><th>状态</th><th>页数</th><th>提交时间</th></tr></thead>
+                <tbody>
+                  <tr><td>报告.doc</td><td>✅ 已完成</td><td>3</td><td>10:23</td></tr>
+                  <tr><td>数据表.xls</td><td>⏳ 打印中</td><td>2</td><td>10:25</td></tr>
+                  <tr><td>图片.bmp</td><td>🕐 排队</td><td>1</td><td>10:27</td></tr>
+                </tbody></table>
+                <button style="margin-top:10px;padding:4px 14px;cursor:pointer;background:#c0c0c0;border:2px solid #fff #000 #000 #fff;font-family:inherit;font-size:10px;"
+                  onclick="alert('打印队列已清空（模拟）')">清空队列</button>
+              </div>`;
+                    break;
+                case 'recycle':
+                    title = '回收站';
+                    icon = '🗑️';
+                    width = 380;
+                    height = 280;
+                    content =
+                        '<div style="text-align:center;padding:30px;font-size:12px;"><div style="font-size:48px;">🗑️</div><p>回收站为空。</p></div>';
+                    break;
+                case 'mydocuments':
+                    title = '我的文档';
+                    icon = '📁';
+                    width = 500;
+                    height = 360;
+                    content = `<div class="icon-view">
+                <div class="drive-icon" ondblclick="openWindow('doc_editor')"><div class="drv-img">📄</div><div class="drv-label">报告.doc</div></div>
+                <div class="drive-icon" ondblclick="openWindow('sheet_editor')"><div class="drv-img">📊</div><div class="drv-label">数据表.xls</div></div>
+                <div class="drive-icon" ondblclick="openWindow('imageviewer')"><div class="drv-img">🖼️</div><div class="drv-label">图片.bmp</div></div>
+                <div class="drive-icon" ondblclick="openWindow('notepad')"><div class="drv-img">📝</div><div class="drv-label">备忘.txt</div></div>
+              </div>`;
+                    break;
+                case 'doc_editor':
+                    title = '报告.doc - 文档编辑器';
+                    icon = '📄';
+                    width = 560;
+                    height = 420;
+                    content = `
+                <div class="doc-toolbar">
+                  <button onclick="docExec('bold')" title="加粗"><b>B</b></button>
+                  <button onclick="docExec('italic')" title="斜体"><i>I</i></button>
+                  <button onclick="docExec('underline')" title="下划线"><u>U</u></button>
+                  <select onchange="docExec('fontSize',this.value)" style="min-width:50px;">
+                    <option value="3">12px</option><option value="4">14px</option><option value="5">18px</option><option value="6">24px</option>
+                  </select>
+                  <button onclick="docExec('justifyLeft')">左对齐</button>
+                  <button onclick="docExec('justifyCenter')">居中</button>
+                  <button onclick="docExec('justifyRight')">右对齐</button>
+                </div>
+                <div class="doc-editor" contenteditable="true" id="doc-editor-body">
+                  <h1 style="text-align:center;">1995年度工作总结报告</h1>
+                  <p style="text-align:center;color:#555;">撰写日期：1995年12月31日</p>
+                  <p>本年度在公司领导的正确指导下，各部门紧密配合，圆满完成了各项既定目标。</p>
+                  <p>在技术创新方面，团队成功攻克了多项技术难题，研发投入同比增长35%。</p>
+                  <p>市场拓展方面，我们新开拓了3个海外市场，国内市场占有率稳步提升至23%。</p>
+                  <p>展望2025年，我们将继续坚持创新驱动发展战略。</p>
+                  <p style="text-align:right;margin-top:16px;">—— 报告人：张经理</p>
+                </div>`;
+                    break;
+                case 'sheet_editor':
+                    title = '数据表.xls - 表格编辑器';
+                    icon = '📊';
+                    width = 620;
+                    height = 420;
+                    content = buildSheetEditor();
+                    break;
+                case 'notepad':
+                    title = '未命名 - 记事本';
+                    icon = '📝';
+                    width = 500;
+                    height = 350;
+                    content = `<textarea style="width:100%;height:100%;border:none;resize:none;font-family:'Courier New',monospace;font-size:13px;padding:6px;outline:none;background:#fff;min-height:120px;">Windows 95 模拟器 - 记事本
+        欢迎使用！这是一个WIndows95模拟器。
+        包含：可编辑文档、电子表格、文件浏览器、扫雷游戏等。</textarea>`;
+                    break;
+                case 'minesweeper':
+                    title = '扫雷';
+                    icon = '💣';
+                    width = 340;
+                    height = 420;
+                    content = buildMinesweeper();
+                    break;
+                case 'imageviewer':
+                    title = '图片.bmp';
+                    icon = '🖼️';
+                    width = 440;
+                    height = 380;
+                    content = '<div style="display:flex;align-items:center;justify-content:center;background:#404040;height:100%;"><canvas id="pixel-art-canvas" width="320" height="240"></canvas></div>';
+                    break;
+                case 'calculator':
+                    title = '计算器';
+                    icon = '🔢';
+                    width = 260;
+                    height = 330;
+                    content = buildCalculator();
+                    break;
+                case 'paint':
+                    title = '未命名 - 画图';
+                    icon = '🎨';
+                    width = 500;
+                    height = 400;
+                    content = buildPaint();
+                    break;
+                case 'about':
+                    title = '关于 Windows 95';
+                    icon = 'ℹ️';
+                    width = 380;
+                    height = 330;
+                    content =
+                        '<div style="padding:18px;text-align:center;font-size:12px;"><div style="font-size:48px;">🪟</div><h2 style="color:#000080;">Windows 95 模拟器</h2><p>版本：MONI v1.0</p><p style="color:#808080;">© 1995-2024</p><p style="margin-top:8px;">📄 可编辑DOC文档<br>📊 可编辑XLS表格<br>💿 文件浏览器<br>💣 扫雷游戏<br>🖨️ 打印机队列<br>⚙️ 控制面板</p><p>zhanghaoxuan制作，本项目基于HTML</p><p>本项目仅为教育和怀旧目的，Windows 95 及其相关元素是微软公司的商标。</p><p>所有界面、图标均为模拟实现，不包含任何原始微软代码或资源。</p><button style="margin-top:10px;padding:4px 28px;cursor:pointer;background:#c0c0c0;border:2px solid #fff #000 #000 #fff;font-family:inherit;" onclick="closeWindow(\'about\')">确定</button></div>';
+                    break;
+                case 'run':
+                    title = '运行';
+                    icon = '▶️';
+                    width = 340;
+                    height = 170;
+                    content =
+                        '<div style="padding:14px;text-align:center;"><p style="margin-bottom:8px;font-size:12px;">请键入程序名称：</p><input type="text" id="run-input" style="width:100%;padding:4px 6px;font-size:12px;border:2px inset #808080;font-family:inherit;" value="notepad"><div style="margin-top:12px;display:flex;gap:6px;justify-content:center;"><button style="padding:4px 18px;cursor:pointer;background:#c0c0c0;border:2px solid #fff #000 #000 #fff;font-family:inherit;font-size:11px;" onclick="runCommand()">确定</button><button style="padding:4px 18px;cursor:pointer;background:#c0c0c0;border:2px solid #fff #000 #000 #fff;font-family:inherit;font-size:11px;" onclick="closeWindow(\'run\')">取消</button></div></div>';
+                    break;
+                default:
+                    title = '窗口';
+                    icon = '📄';
+                    width = 400;
+                    height = 260;
+                    content = '<p style="padding:14px;">未知窗口</p>';
+            }
+            createWindowElement(id, title, content, icon, width, height);
+            if (id === 'imageviewer') setTimeout(() => drawPixelArt(), 150);
+            if (id === 'minesweeper') setTimeout(() => initMinesweeper(id), 200);
+            if (id === 'calculator') setTimeout(() => initCalculator(id), 120);
+            if (id === 'paint') setTimeout(() => initPaint(id), 180);
+            if (id === 'sheet_editor') setTimeout(() => initSheetEditor(id), 150);
+            updateTaskbarButtons();
+        }
+
+        function closeWindow(id) {
+            if (!openWindows[id]) return;
+            const el = openWindows[id].element;
+            el.style.transition = 'opacity 0.08s';
+            el.style.opacity = '0';
+            setTimeout(() => {
+                if (el.parentNode) el.parentNode.removeChild(el);
+                delete openWindows[id];
+                if (activeWindowId === id) {
+                    activeWindowId = null;
+                    const rem = Object.entries(openWindows);
+                    if (rem.length > 0) { const tw = rem.reduce((a, b) => (parseInt(a[1].element.style.zIndex) || 0) > (
+                            parseInt(b[1].element.style.zIndex) || 0) ? a : b);
+                        activateWindow(tw[0]); }
+                }
+                updateTaskbarButtons();
+            }, 80);
+        }
+
+        function minimizeWindow(id) {
+            if (!openWindows[id]) return;
+            openWindows[id].minimized = true;
+            openWindows[id].element.classList.add('minimized');
+            openWindows[id].element.classList.remove('active');
+            if (activeWindowId === id) {
+                activeWindowId = null;
+                const rem = Object.entries(openWindows).filter(([, w]) => !w.minimized);
+                if (rem.length > 0) { const tw = rem.reduce((a, b) => (parseInt(a[1].element.style.zIndex) || 0) > (parseInt(
+                        b[1].element.style.zIndex) || 0) ? a : b);
+                    activateWindow(tw[0]); }
+            }
+            updateTaskbarButtons();
+        }
+
+        function restoreWindow(id) {
+            if (!openWindows[id]) return;
+            openWindows[id].minimized = false;
+            openWindows[id].element.classList.remove('minimized');
+            activateWindow(id);
+            bringToFront(id);
+            updateTaskbarButtons();
+        }
+
+        function toggleMaximize(id) {
+            if (!openWindows[id]) return;
+            const w = openWindows[id];
+            if (w.maximized) {
+                w.maximized = false;
+                w.element.classList.remove('maximized');
+                w.element.style.left = w.prevState.left + 'px';
+                w.element.style.top = w.prevState.top + 'px';
+                w.element.style.width = w.prevState.width + 'px';
+                w.element.style.height = w.prevState.height + 'px';
+                w.element.style.resize = 'both';
+            } else {
+                w.prevState = { left: parseInt(w.element.style.left), top: parseInt(w.element.style.top), width: parseInt(
+                        w.element.style.width), height: parseInt(w.element.style.height) };
+                w.maximized = true;
+                w.element.classList.add('maximized');
+                w.element.style.resize = 'none';
+            }
+            updateMaximizeButton(id);
+            activateWindow(id);
+        }
+
+        function updateMaximizeButton(id) {
+            const btn = document.getElementById('maxbtn-' + id);
+            if (!btn) return;
+            const w = openWindows[id];
+            btn.className = w && w.maximized ? 'win-btn win-btn-restore' : 'win-btn win-btn-maximize';
+            btn.title = w && w.maximized ? '还原' : '最大化';
+        }
+
+        function bringToFront(id) { if (!openWindows[id]) return;
+            windowZIndex++;
+            openWindows[id].element.style.zIndex = windowZIndex; }
+
+        // ============ 拖动 ============
+        function startDrag(e, id) {
+            if (!openWindows[id] || openWindows[id].maximized) return;
+            e.preventDefault();
+            dragging = { windowId: id, startX: e.clientX, startY: e.clientY, origLeft: parseInt(openWindows[id].element
+                    .style.left), origTop: parseInt(openWindows[id].element.style.top) };
+            activateWindow(id);
+            bringToFront(id);
+            document.addEventListener('mousemove', onDrag);
+            document.addEventListener('mouseup', stopDrag);
+            document.body.style.cursor = 'move';
+        }
+
+        function onDrag(e) {
+            if (!dragging) return;
+            const w = openWindows[dragging.windowId];
+            if (!w || w.maximized) return;
+            w.element.style.left = Math.max(-35, Math.min(dragging.origLeft + e.clientX - dragging.startX, window
+            .innerWidth - 45)) + 'px';
+            w.element.style.top = Math.max(-10, Math.min(dragging.origTop + e.clientY - dragging.startY, window
+            .innerHeight - 40)) + 'px';
+        }
+
+        function stopDrag() { dragging = null;
+            document.removeEventListener('mousemove', onDrag);
+            document.removeEventListener('mouseup', stopDrag);
+            document.body.style.cursor = 'default'; }
+
+        // ============ 任务栏 ============
+        function updateTaskbarButtons() {
+            const c = document.getElementById('taskbar-windows');
+            c.innerHTML = '';
+            Object.entries(openWindows).forEach(([id, w]) => {
+                const btn = document.createElement('button');
+                btn.className = 'taskbar-window-btn' + (id === activeWindowId && !w.minimized ? ' active' : '');
+                btn.textContent = w.icon + ' ' + w.title;
+                btn.title = w.title;
+                btn.onclick = function(e) { e.stopPropagation(); if (w.minimized) restoreWindow(id);
+                    else if (id === activeWindowId) minimizeWindow(id);
+                    else { activateWindow(id);
+                        bringToFront(id); } };
+                c.appendChild(btn);
+            });
+        }
+
+        // ============ 开始菜单 ============
+        function toggleStartMenu(e) { e.stopPropagation(); if (startMenuOpen) closeStartMenu();
+            else openStartMenu(); }
+
+        function openStartMenu() { startMenuOpen = true;
+            document.getElementById('start-menu').classList.add('show');
+            document.getElementById('start-button').classList.add('active');
+            closeAllSubmenus(); }
+
+        function closeStartMenu() { startMenuOpen = false;
+            document.getElementById('start-menu').classList.remove('show');
+            document.getElementById('start-button').classList.remove('active');
+            closeAllSubmenus(); }
+
+        function closeAllSubmenus() { document.querySelectorAll('.submenu').forEach(s => s.classList.remove('show')); }
+
+        function toggleSubmenu(e, id) { e.stopPropagation(); const s = document.getElementById(id); if (!s) return; const
+                o = s.classList.contains('show');
+            closeAllSubmenus(); if (!o) s.classList.add('show'); }
+
+        function toggleSubmenuNested(e, id) { e.stopPropagation(); const s = document.getElementById(id); if (s) s.classList
+                .toggle('show'); }
+
+        // ============ 桌面图标 ============
+        function selectDesktopIcon(el, e) { e.stopPropagation(); if (selectedDesktopIconEl && selectedDesktopIconEl !== el)
+                selectedDesktopIconEl.classList.remove('selected');
+            el.classList.add('selected');
+            selectedDesktopIconEl = el; }
+
+        function deselectAllIcons() { if (selectedDesktopIconEl) { selectedDesktopIconEl.classList.remove('selected');
+                selectedDesktopIconEl = null; } }
+
+        // ============ 右键菜单 ============
+        function showContextMenu(e) {
+            e.preventDefault();
+            const m = document.getElementById('context-menu');
+            m.style.display = 'flex';
+            m.style.left = Math.min(e.clientX, window.innerWidth - 180) + 'px';
+            m.style.top = Math.min(e.clientY, window.innerHeight - 220) + 'px';
+        }
+
+        function hideContextMenu() { document.getElementById('context-menu').style.display = 'none'; }
+
+        function ctxArrangeIcons() { alert('图标已按名称排列（模拟）');
+            hideContextMenu(); }
+
+        function ctxRefresh() { const d = document.getElementById('desktop');
+            d.style.opacity = '0.8';
+            setTimeout(() => d.style.opacity = '1', 120);
+            hideContextMenu(); }
+
+        function ctxPaste() { alert('粘贴完成（模拟）');
+            hideContextMenu(); }
+
+        function ctxProperties() { alert('桌面属性（模拟）\n背景色: ' + getComputedStyle(document.getElementById('desktop')).background);
+            hideContextMenu(); }
+
+        function changeDesktopColor(color) {
+            document.getElementById('desktop').style.background = color;
+            const txt = document.getElementById('current-color-text');
+            if (txt) txt.textContent = color;
+        }
+
+        // ============ 文件浏览器 ============
+        function buildFileBrowser(path) {
+            const fs = getFS(path);
+            if (!fs || fs.type !== 'folder') return '<p>无法访问</p>';
+            const items = fs.children || {};
+            let html =
+                '<div class="file-browser"><div class="fb-toolbar"><button onclick="alert(\'后退(模拟)\')">⬅ 后退</button><input class="fb-address" value="' +
+                path + '" readonly><button onclick="alert(\'向上(模拟)\')">⬆</button></div><div class="fb-list">';
+            for (const [name, item] of Object.entries(items)) {
+                const emoji = item.type === 'folder' ? '📁' : '📄';
+                html +=
+                    `<div class="fb-item" ondblclick="${item.type==='folder'?`alert('文件夹: ${name} (模拟展开)')`:`alert('文件: ${name}\\n内容: ${(item.content||'').substring(0,60)}')`}" title="${name}"><div class="fb-img">${emoji}</div><div class="fb-label">${name}</div></div>`;
+            }
+            html += '</div></div>';
+            return html;
+        }
+
+        // ============ 表格编辑器 ============
+        function buildSheetEditor() {
+            const months = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+            const data = [
+                ['月份', '销售额(万元)', '成本(万元)', '利润(万元)', '利润率'],
+                ['1月', '120', '78', '42', '35.0%'],
+                ['2月', '135', '82', '53', '39.3%'],
+                ['3月', '148', '90', '58', '39.2%'],
+                ['4月', '160', '95', '65', '40.6%'],
+                ['5月', '175', '100', '75', '42.9%'],
+                ['6月', '190', '108', '82', '43.2%'],
+                ['7月', '205', '115', '90', '43.9%'],
+                ['8月', '198', '112', '86', '43.4%'],
+                ['9月', '220', '120', '100', '45.5%'],
+                ['10月', '240', '130', '110', '45.8%'],
+                ['11月', '258', '138', '120', '46.5%'],
+                ['12月', '280', '145', '135', '48.2%'],
+            ];
+            let html =
+                '<div class="sheet-toolbar"><button onclick="sheetAddRow()">+行</button><button onclick="sheetAddCol()">+列</button><button onclick="sheetRecalc()">🔄重算</button><span class="cell-addr" id="cell-addr-display">A1</span></div><div class="sheet-table-wrap"><table id="editable-sheet-table"><thead><tr>';
+            data[0].forEach((_, i) => html +=
+                `<th>${String.fromCharCode(65+i)}</th>`);
+            html += '</tr></thead><tbody>';
+            for (let r = 1; r < data.length; r++) {
+                html += '<tr>';
+                data[r].forEach((val, c) => html +=
+                    `<td><input value="${val}" data-row="${r}" data-col="${c}" onfocus="sheetSelectCell(this)" onchange="sheetRecalc()"></td>`
+                    );
+                html += '</tr>';
+            }
+            html += '</tbody></table></div>';
+            return html;
+        }
+
+        function initSheetEditor(id) {
+            const table = document.getElementById('editable-sheet-table');
+            if (!table) return;
+            table.addEventListener('click', function(e) {
+                const inp = e.target.closest('input');
+                if (inp) sheetSelectCell(inp);
+            });
+        }
+
+        function sheetSelectCell(inp) {
+            document.querySelectorAll('#editable-sheet-table td').forEach(td => td.classList.remove(
+            'selected-cell'));
+            const td = inp.closest('td');
+            if (td) td.classList.add('selected-cell');
+            const addr = document.getElementById('cell-addr-display');
+            if (addr && inp) {
+                const r = parseInt(inp.dataset.row);
+                const c = parseInt(inp.dataset.col);
+                addr.textContent = String.fromCharCode(65 + c) + r;
+            }
+        }
+
+        function sheetRecalc() {
+            const table = document.getElementById('editable-sheet-table');
+            if (!table) return;
+            const rows = table.querySelectorAll('tbody tr');
+            rows.forEach(row => {
+                const cells = row.querySelectorAll('td input');
+                if (cells.length >= 5) {
+                    const sales = parseFloat(cells[1].value) || 0;
+                    const cost = parseFloat(cells[2].value) || 0;
+                    const profit = sales - cost;
+                    cells[3].value = profit.toFixed(0);
+                    cells[4].value = sales > 0 ? (profit / sales * 100).toFixed(1) + '%' : '0%';
+                }
+            });
+        }
+
+        function sheetAddRow() {
+            const table = document.getElementById('editable-sheet-table');
+            if (!table) return;
+            const tbody = table.querySelector('tbody');
+            const cols = table.querySelector('thead tr').children.length;
+            const rowNum = tbody.children.length + 1;
+            let tr = '<tr>';
+            for (let i = 0; i < cols; i++) tr +=
+                `<td><input value="" data-row="${rowNum}" data-col="${i}" onfocus="sheetSelectCell(this)" onchange="sheetRecalc()"></td>`;
+            tr += '</tr>';
+            tbody.insertAdjacentHTML('beforeend', tr);
+        }
+
+        function sheetAddCol() {
+            const table = document.getElementById('editable-sheet-table');
+            if (!table) return;
+            const thead = table.querySelector('thead tr');
+            const newColIdx = thead.children.length;
+            const colLetter = String.fromCharCode(65 + newColIdx);
+            thead.insertAdjacentHTML('beforeend', `<th>${colLetter}</th>`);
+            table.querySelectorAll('tbody tr').forEach((row, ri) => {
+                row.insertAdjacentHTML('beforeend',
+                    `<td><input value="" data-row="${ri+1}" data-col="${newColIdx}" onfocus="sheetSelectCell(this)" onchange="sheetRecalc()"></td>`
+                    );
+            });
+        }
+        window.sheetRecalc = sheetRecalc;
+        window.sheetAddRow = sheetAddRow;
+        window.sheetAddCol = sheetAddCol;
+        window.sheetSelectCell = sheetSelectCell;
+
+        // ============ DOC编辑器 ============
+        function docExec(cmd, val) {
+            document.execCommand(cmd, false, val || null);
+            const ed = document.getElementById('doc-editor-body');
+            if (ed) ed.focus();
+        }
+        window.docExec = docExec;
+
+        // ============ 扫雷 ============
+        function buildMinesweeper() {
+            return `<div class="minesweeper-container" id="ms-container">
+            <div class="minesweeper-header">
+              <div class="mine-counter" id="ms-counter">010</div>
+              <div class="mine-face" id="ms-face" onclick="resetMinesweeper()">🙂</div>
+              <div class="mine-timer" id="ms-timer">000</div>
+            </div>
+            <div class="mine-grid" id="ms-grid"></div>
+            <button style="margin-top:6px;padding:3px 12px;cursor:pointer;background:#c0c0c0;border:2px solid #fff #000 #000 #fff;font-family:inherit;font-size:10px;" onclick="resetMinesweeper()">新游戏</button>
+          </div>`;
+        }
+        let msState = null;
+
+        function initMinesweeper(id) { resetMinesweeper(); }
+
+        function resetMinesweeper() {
+            const grid = document.getElementById('ms-grid');
+            const counter = document.getElementById('ms-counter');
+            const timer = document.getElementById('ms-timer');
+            const face = document.getElementById('ms-face');
+            if (!grid) return;
+            const rows = 9,
+                cols = 9,
+                mines = 10;
+            msState = {
+                rows,
+                cols,
+                mines,
+                board: [],
+                revealed: [],
+                flagged: [],
+                gameOver: false,
+                started: false,
+                timer: 0,
+                timerInterval: null,
+                remainingMines: mines
+            };
+            for (let r = 0; r < rows; r++) { msState.board[r] = Array(cols).fill(0);
+                msState.revealed[r] = Array(cols).fill(false);
+                msState.flagged[r] = Array(cols).fill(false); }
+            let placed = 0;
+            while (placed < mines) { const rr = Math.floor(Math.random() * rows),
+                    cc = Math.floor(Math.random() * cols); if (msState.board[rr][cc] !== 'X') { msState.board[rr][cc] =
+                        'X';
+                    placed++; } }
+            for (let r = 0; r < rows; r++)
+                for (let c = 0; c < cols; c++)
+                    if (msState.board[r][c] !== 'X') { let count = 0; for (let dr = -1; dr <= 1; dr++)
+                            for (let dc = -1; dc <= 1; dc++) { const nr = r + dr,
+                                    nc = c + dc; if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && msState.board[nr][
+                                        nc
+                                    ] === 'X') count++; } msState.board[r][c] = count; }
+            if (msState.timerInterval) clearInterval(msState.timerInterval);
+            msState.timer = 0;
+            msState.gameOver = false;
+            msState.started = false;
+            msState.remainingMines = mines;
+            counter.textContent = String(mines).padStart(3, '0');
+            timer.textContent = '000';
+            face.textContent = '🙂';
+            renderMSGrid();
+        }
+
+        function renderMSGrid() {
+            const grid = document.getElementById('ms-grid');
+            if (!grid || !msState) return;
+            grid.style.gridTemplateColumns = `repeat(${msState.cols},20px)`;
+            grid.innerHTML = '';
+            for (let r = 0; r < msState.rows; r++) {
+                for (let c = 0; c < msState.cols; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'mine-cell';
+                    cell.dataset.row = r;
+                    cell.dataset.col = c;
+                    if (msState.revealed[r][c]) {
+                        cell.classList.add('revealed');
+                        if (msState.board[r][c] === 'X') {
+                            cell.textContent = '💣';
+                            cell.classList.add('mine-exploded');
+                        } else if (msState.board[r][c] > 0) {
+                            cell.textContent = msState.board[r][c];
+                            const colors = ['', '#0000ff', '#008000', '#ff0000', '#000080', '#800000', '#008080',
+                                '#000000', '#808080'
+                            ];
+                            cell.style.color = colors[msState.board[r][c]] || '#000';
+                        }
+                    } else if (msState.flagged[r][c]) {
+                        cell.textContent = '🚩';
+                        cell.classList.add('flagged');
+                    }
+                    cell.addEventListener('click', (e) => msClick(r, c));
+                    cell.addEventListener('contextmenu', (e) => { e.preventDefault();
+                        msRightClick(r, c); });
+                    grid.appendChild(cell);
+                }
+            }
+            document.getElementById('ms-counter').textContent = String(msState.remainingMines).padStart(3, '0');
+            document.getElementById('ms-timer').textContent = String(msState.timer).padStart(3, '0');
+        }
+
+        function msClick(r, c) {
+            if (!msState || msState.gameOver || msState.flagged[r][c] || msState.revealed[r][c]) return;
+            if (!msState.started) { msState.started = true;
+                msState.timerInterval = setInterval(() => { if (msState && msState.started && !msState.gameOver) {
+                        msState.timer++;
+                        document.getElementById('ms-timer').textContent = String(Math.min(msState.timer, 999))
+                            .padStart(3, '0'); } }, 1000); }
+            if (msState.board[r][c] === 'X') {
+                msState.revealed[r][c] = true;
+                msState.gameOver = true;
+                if (msState.timerInterval) clearInterval(msState.timerInterval);
+                document.getElementById('ms-face').textContent = '😵';
+                for (let rr = 0; rr < msState.rows; rr++)
+                    for (let cc = 0; cc < msState.cols; cc++)
+                        if (msState.board[rr][cc] === 'X') msState.revealed[rr][cc] = true;
+                renderMSGrid();
+                setTimeout(() => alert('💥 踩到地雷了！游戏结束。'), 200);
+                return;
+            }
+            msReveal(r, c);
+            if (msCheckWin()) {
+                msState.gameOver = true;
+                if (msState.timerInterval) clearInterval(msState.timerInterval);
+                document.getElementById('ms-face').textContent = '😎';
+                for (let rr = 0; rr < msState.rows; rr++)
+                    for (let cc = 0; cc < msState.cols; cc++)
+                        if (msState.board[rr][cc] === 'X') msState.flagged[rr][cc] = true;
+                renderMSGrid();
+                setTimeout(() => alert('🎉 恭喜你赢了！'), 200);
+            }
+            renderMSGrid();
+        }
+
+        function msReveal(r, c) {
+            if (r < 0 || r >= msState.rows || c < 0 || c >= msState.cols) return;
+            if (msState.revealed[r][c] || msState.flagged[r][c]) return;
+            msState.revealed[r][c] = true;
+            if (msState.board[r][c] === 0) {
+                for (let dr = -1; dr <= 1; dr++)
+                    for (let dc = -1; dc <= 1; dc++) msReveal(r + dr, c + dc);
+            }
+        }
+
+        function msRightClick(r, c) {
+            if (!msState || msState.gameOver || msState.revealed[r][c] || !msState.started) return;
+            msState.flagged[r][c] = !msState.flagged[r][c];
+            msState.remainingMines += msState.flagged[r][c] ? -1 : 1;
+            renderMSGrid();
+            if (msCheckWin()) {
+                msState.gameOver = true;
+                if (msState.timerInterval) clearInterval(msState.timerInterval);
+                document.getElementById('ms-face').textContent = '😎';
+                setTimeout(() => alert('🎉 恭喜你赢了！'), 200);
+            }
+        }
+
+        function msCheckWin() {
+            for (let r = 0; r < msState.rows; r++)
+                for (let c = 0; c < msState.cols; c++)
+                    if (msState.board[r][c] !== 'X' && !msState.revealed[r][c]) return false;
+            return true;
+        }
+        window.resetMinesweeper = resetMinesweeper;
+
+        // ============ 计算器 ============
+        function buildCalculator() {
+            return `<div style="display:flex;flex-direction:column;padding:5px;background:#d4d0c8;height:100%;gap:3px;font-family:'Courier New',monospace;">
+            <div id="calc-display" style="background:#fff;border:2px inset #808080;padding:5px 7px;font-size:17px;text-align:right;min-height:32px;">0</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:2px;flex:1;" id="calc-btns">
+              <button>7</button><button>8</button><button>9</button><button style="background:#e8e4dc;">/</button>
+              <button>4</button><button>5</button><button>6</button><button style="background:#e8e4dc;">*</button>
+              <button>1</button><button>2</button><button>3</button><button style="background:#e8e4dc;">-</button>
+              <button>0</button><button>.</button><button style="background:#e8e4dc;">C</button><button style="background:#e8e4dc;">+</button>
+              <button style="grid-column:span 4;background:#000080;color:#fff;">=</button>
+            </div></div>`;
+        }
+
+        function initCalculator(id) {
+            const disp = document.getElementById('calc-display');
+            const btns = document.getElementById('calc-btns');
+            if (!disp || !btns) return;
+            let cur = '0',
+                prev = '',
+                op = null,
+                reset = false;
+
+            function upd() { disp.textContent = cur; }
+            btns.querySelectorAll('button').forEach(b => {
+                b.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const v = this.textContent;
+                    if (v === 'C') { cur = '0';
+                        prev = '';
+                        op = null;
+                        reset = false; } else if (v === '=') {
+                        if (op && prev !== '') {
+                            const a = parseFloat(prev),
+                                b = parseFloat(cur);
+                            let r = 0;
+                            switch (op) {
+                                case '+':
+                                    r = a + b;
+                                    break;
+                                case '-':
+                                    r = a - b;
+                                    break;
+                                case '*':
+                                    r = a * b;
+                                    break;
+                                case '/':
+                                    r = b !== 0 ? a / b : 'Err';
+                                    break;
+                            }
+                            cur = String(r);
+                            prev = '';
+                            op = null;
+                            reset = true;
+                        }
+                    } else if (['+', '-', '*', '/'].includes(v)) {
+                        if (op && !reset && prev !== '') {
+                            const a = parseFloat(prev),
+                                b = parseFloat(cur);
+                            let r = 0;
+                            switch (op) {
+                                case '+':
+                                    r = a + b;
+                                    break;
+                                case '-':
+                                    r = a - b;
+                                    break;
+                                case '*':
+                                    r = a * b;
+                                    break;
+                                case '/':
+                                    r = b !== 0 ? a / b : 'Err';
+                                    break;
+                            }
+                            cur = String(r);
+                        }
+                        prev = cur;
+                        op = v;
+                        reset = true;
+                    } else if (v === '.') { if (reset) { cur = '0.';
+                            reset = false; } else if (!cur.includes('.')) cur += '.'; } else { if (reset || cur ===
+                            '0') { cur = v;
+                            reset = false; } else cur += v; }
+                    upd();
+                });
+            });
+        }
+
+        // ============ 画图 ============
+        function buildPaint() {
+            return `<div style="display:flex;flex-direction:column;height:100%;background:#d4d0c8;">
+            <div style="display:flex;gap:4px;padding:3px 5px;background:#d4d0c8;border-bottom:1px solid #808080;flex-wrap:wrap;align-items:center;">
+              <span style="font-size:9px;">画笔:</span>
+              <button class="ps-btn" data-size="2" style="font-weight:bold;font-size:9px;padding:2px 6px;">小</button>
+              <button class="ps-btn" data-size="5" style="font-weight:bold;font-size:9px;padding:2px 6px;">中</button>
+              <button class="ps-btn" data-size="10" style="font-weight:bold;font-size:9px;padding:2px 6px;">大</button>
+              <span>|</span>
+              <span class="pc-btn active" data-color="#000" style="background:#000;width:18px;height:18px;border:2px solid #fff #000 #000 #fff;cursor:pointer;"></span>
+              <span class="pc-btn" data-color="#f00" style="background:#f00;width:18px;height:18px;border:2px solid #fff #000 #000 #fff;cursor:pointer;"></span>
+              <span class="pc-btn" data-color="#080" style="background:#080;width:18px;height:18px;border:2px solid #fff #000 #000 #fff;cursor:pointer;"></span>
+              <span class="pc-btn" data-color="#00f" style="background:#00f;width:18px;height:18px;border:2px solid #fff #000 #000 #fff;cursor:pointer;"></span>
+              <span class="pc-btn" data-color="#fff" style="background:#fff;width:18px;height:18px;border:2px solid #fff #000 #000 #fff;cursor:pointer;"></span>
+              <span>|</span>
+              <button onclick="clearPaint()" style="font-size:9px;padding:2px 6px;">清除</button>
+            </div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;background:#808080;padding:6px;">
+              <canvas id="paint-canvas" width="380" height="260" style="background:#fff;border:2px solid #000;max-width:100%;max-height:100%;cursor:crosshair;"></canvas>
+            </div></div>`;
+        }
+        let paintBrushSize = 2,
+            paintColor = '#000';
+
+        function initPaint(id) {
+            const canvas = document.getElementById('paint-canvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            let drawing = false;
+
+            function getPos(e) {
+                const rect = canvas.getBoundingClientRect();
+                return { x: (e.clientX - rect.left) * (canvas.width / rect.width), y: (e.clientY - rect.top) * (canvas
+                        .height / rect.height) };
+            }
+            canvas.onmousedown = function(e) { drawing = true;
+                const p = getPos(e);
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y);
+                ctx.fillStyle = paintColor;
+                ctx.strokeStyle = paintColor;
+                ctx.lineWidth = paintBrushSize;
+                ctx.lineCap = 'round';
+                ctx.arc(p.x, p.y, paintBrushSize / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y); };
+            canvas.onmousemove = function(e) { if (!drawing) return;
+                const p = getPos(e);
+                ctx.lineTo(p.x, p.y);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y); };
+            canvas.onmouseup = function() { drawing = false;
+                ctx.beginPath(); };
+            canvas.onmouseleave = function() { drawing = false;
+                ctx.beginPath(); };
+            document.querySelectorAll('.ps-btn').forEach(b => b.onclick = function() {
+                document.querySelectorAll('.ps-btn').forEach(x => x.style.background = '#c0c0c0');
+                this.style.background = '#e0e0e0';
+                paintBrushSize = parseInt(this.dataset.size);
+            });
+            document.querySelectorAll('.pc-btn').forEach(b => b.onclick = function() {
+                document.querySelectorAll('.pc-btn').forEach(x => x.classList.remove('active'));
+                this.classList.add('active');
+                paintColor = this.dataset.color;
+            });
+        }
+        window.clearPaint = function() {
+            const c = document.getElementById('paint-canvas');
+            if (c) { const ctx = c.getContext('2d');
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, c.width, c.height); }
+        };
+
+        // ============ 像素画 ============
+        function drawPixelArt() {
+            const canvas = document.getElementById('pixel-art-canvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d'),
+                w = canvas.width,
+                h = canvas.height;
+            const sky = ctx.createLinearGradient(0, 0, 0, h * 0.5);
+            sky.addColorStop(0, '#4a90d9');
+            sky.addColorStop(1, '#b8d8f8');
+            ctx.fillStyle = sky;
+            ctx.fillRect(0, 0, w, h * 0.5);
+            ctx.fillStyle = '#fff7b0';
+            ctx.beginPath();
+            ctx.arc(w * 0.78, h * 0.16, 28, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#ffe44d';
+            ctx.beginPath();
+            ctx.arc(w * 0.78, h * 0.16, 20, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(w * 0.2, h * 0.12, 18, 0, Math.PI * 2);
+            ctx.arc(w * 0.27, h * 0.09, 14, 0, Math.PI * 2);
+            ctx.arc(w * 0.32, h * 0.12, 16, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#7ab648';
+            ctx.beginPath();
+            ctx.moveTo(0, h * 0.52);
+            ctx.quadraticCurveTo(w * 0.3, h * 0.35, w * 0.55, h * 0.48);
+            ctx.quadraticCurveTo(w * 0.75, h * 0.38, w, h * 0.44);
+            ctx.lineTo(w, h * 0.55);
+            ctx.lineTo(0, h * 0.55);
+            ctx.fill();
+            ctx.fillStyle = '#5da83d';
+            ctx.fillRect(0, h * 0.5, w, h * 0.5);
+            ctx.fillStyle = '#c9b896';
+            ctx.beginPath();
+            ctx.moveTo(w * 0.44, h);
+            ctx.quadraticCurveTo(w * 0.46, h * 0.65, w * 0.49, h * 0.55);
+            ctx.lineTo(w * 0.51, h * 0.55);
+            ctx.quadraticCurveTo(w * 0.54, h * 0.65, w * 0.56, h);
+            ctx.fill();
+            for (let i = 0; i < 6; i++) {
+                const fx = w * (0.12 + i * 0.14),
+                    fy = h * (0.65 + Math.sin(i) * 0.08),
+                    fc = ['#ff6b6b', '#ffcc00', '#ff6bb5', '#ff8800', '#ff4444', '#ffaa00'][i];
+                ctx.fillStyle = fc;
+                for (let j = 0; j < 5; j++) { const a = j / 5 * Math.PI * 2;
+                    ctx.beginPath();
+                    ctx.arc(fx + Math.cos(a) * 4, fy + Math.sin(a) * 4, 2.5, 0, Math.PI * 2);
+                    ctx.fill(); }
+                ctx.fillStyle = '#ffe44d';
+                ctx.beginPath();
+                ctx.arc(fx, fy, 2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.fillStyle = '#e8dcc8';
+            ctx.fillRect(w * 0.33, h * 0.4, 35, 26);
+            ctx.fillStyle = '#8b4513';
+            ctx.beginPath();
+            ctx.moveTo(w * 0.31, h * 0.4);
+            ctx.lineTo(w * 0.5, h * 0.28);
+            ctx.lineTo(w * 0.54, h * 0.4);
+            ctx.fill();
+            ctx.fillStyle = '#5c3317';
+            ctx.fillRect(w * 0.45, h * 0.44, 9, 12);
+        }
+
+        // ============ 运行命令 ============
+        function runCommand() {
+            const inp = document.getElementById('run-input');
+            const cmd = (inp ? inp.value.trim().toLowerCase() : 'notepad');
+            const map = { 'notepad': 'notepad', 'calc': 'calculator', 'calculator': 'calculator', 'paint': 'paint',
+                'mspaint': 'paint', 'explorer': 'c_drive', 'winmine': 'minesweeper', 'minesweeper': 'minesweeper',
+                'about': 'about', 'control': 'controlpanel' };
+            closeWindow('run');
+            openWindow(map[cmd] || 'notepad');
+        }
+        window.runCommand = runCommand;
+
+        // ============ 时钟 ============
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('clock').textContent = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes()
+                .toString().padStart(2, '0');
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // ============ 全局事件 ============
+        document.getElementById('desktop').addEventListener('mousedown', function(e) {
+            if (e.target === this || e.target.id === 'desktop-icons' || e.target.id === 'windows-container') {
+                deselectAllIcons();
+                if (startMenuOpen) closeStartMenu();
+                hideContextMenu();
+                closeAllSubmenus();
+            }
+        });
+        document.getElementById('desktop').addEventListener('contextmenu', function(e) {
+            if (e.target === this || e.target.id === 'desktop-icons' || e.target.id === 'windows-container' || (e
+                    .target.closest('#desktop-icons') && !e.target.closest('.desktop-icon'))) showContextMenu(e);
+        });
+        document.addEventListener('mousedown', function(e) {
+            if (startMenuOpen && !document.getElementById('start-menu').contains(e.target) && !document.getElementById(
+                    'start-button').contains(e.target)) closeStartMenu();
+            if (!e.target.closest('.submenu') && !e.target.closest('.has-submenu')) closeAllSubmenus();
+            if (!e.target.closest('#context-menu')) hideContextMenu();
+        });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                if (document.getElementById('shutdown-overlay').classList.contains('show')) hideShutdownDialog();
+                else if (startMenuOpen) closeStartMenu();
+                hideContextMenu();
+                closeAllSubmenus();
+            }
+            if (e.altKey && e.key === 'F4' && activeWindowId) { e.preventDefault();
+                closeWindow(activeWindowId); }
+            if ((e.key === 'Meta') || (e.ctrlKey && e.key === 'Escape')) { e.preventDefault(); if (startMenuOpen)
+                    closeStartMenu();
+                else openStartMenu(); }
+        });
+        window.addEventListener('resize', function() {
+            Object.entries(openWindows).forEach(([, w]) => {
+                if (w.maximized) { w.element.style.width = '100%';
+                    w.element.style.height = 'calc(100vh - var(--taskbar-height))'; }
+            });
+        });
+        document.getElementById('start-menu').addEventListener('contextmenu', function(e) { e.preventDefault(); });
+        document.addEventListener('touchmove', function(e) { if (dragging) e.preventDefault(); }, { passive: false });
+
+        // ============ 初始加载 ============
+        console.log('🪟 Windows 95 模拟器已就绪！');
+        console.log('  📄 可编辑DOC | 📊 可编辑XLS | 💿 文件浏览器');
+        console.log('  💣 扫雷游戏 | 🖨️ 打印机 | ⚙️ 控制面板');
+        console.log('  右键桌面查看完整上下文菜单');
+        setTimeout(() => openWindow('about'), 400);
+    </script>
+</body>
+</html>
